@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# Author: Albert Esteve
+
+venv_path=$HOME/.venv/vdsm
+venv_activate_path=${venv_path}/bin/activate
+
+print_help()
+{
+    echo "oVirt/vdsm command line helper."
+    echo "Should be run from the repository root folder."
+    echo "Usage: $0 CMD [options]"
+    echo
+    echo "Available commands:"
+    echo "help:           Print this message and exits."
+    echo "build:          Build vdsm and make RPMs."
+    echo "build-install:  Build vdsm, make RPMs, and update local packages."
+    echo "test-storage:   Run a storage test using tox."
+    echo "tests-coverage: Show coverage results generated after a test run."
+}
+
+venv_create()
+{
+    python3 -m venv ${venv_path}
+    source ${venv_activate_path}
+    pip install --upgrade pip
+    pip install -r docker/requirements.txt
+    deactivate
+}
+
+test_path()
+{
+    path=$1
+    storage_prefix=storage/
+    if [ ! -f "tests/$path" ]; then
+        path=${storage_refix}${path}
+        if [ ! -f "tests/$path" ]; then
+            echo "No test $path found"
+            exit 1
+        fi
+    fi
+}
+
+vdsm_build()
+{
+    git clean -dxf && ./autogen.sh --system --enable-timestamp && \
+         make && rm -rf ~/rpmbuild && make rpm
+}
+
+if [ -z "$1" ]; then
+    echo "Command missing"
+    print_help
+    exit 1
+fi
+
+case $1 in
+
+    help )
+
+        print_help
+
+        ;;
+
+    build )
+
+        vdsm_build
+
+        ;;
+
+    build-install )
+
+        vdsm_build && (cd ~/rpmbuild/RPMS && sudo dnf upgrade */vdsm*.rpm)
+
+        ;;
+    
+    test-storage )
+
+        shift
+        test=$1
+
+        if [[ "$test" == *":"* ]]; then
+            IFS=':' read -a filepath rest <<<"$test"
+            test_path $filepath
+        else
+            test_path $test
+        fi
+        
+        if [ ! -f $venv_activate_path ]; then
+            venv_create
+        fi
+
+        make storage
+
+        source ${venv_activate_path}
+        if [[ $test == "" ]]; then
+            echo "Running: tox -e storage"
+            tox -e storage
+        else
+            echo "Running: tox -e storage -- -vv $test ${*:2}"
+            tox -e storage -- -vv $test ${*:2}
+        fi
+        ;;
+
+    tests-coverage )
+
+        cov_path=tests/htmlcov-storage/index.html
+
+        if [ ! -f $cov_path ]; then
+            echo "No coverage summary found"
+            exit 1
+        fi
+
+        xdg-open tests/htmlcov-storage/index.html
+
+        ;;
+
+    * )
+
+        echo "Unknwon option: $1"
+        print_help
+        exit 1
+        ;;
+
+esac
